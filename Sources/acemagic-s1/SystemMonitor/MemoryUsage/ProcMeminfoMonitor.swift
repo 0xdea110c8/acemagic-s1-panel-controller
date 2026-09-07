@@ -1,13 +1,7 @@
 #if os(Linux)
     import Glibc
 
-    actor ProcMeminfoMonitor {
-        private(set) var currentUsage: (total: UInt64, available: UInt64)
-
-        init() {
-            currentUsage = (0, 0)
-        }
-
+    struct ProcMeminfoMonitor {
         func getCurrentMemoryUsage() -> (total: UInt64, available: UInt64) {
             let fileDescriptor = open("/proc/meminfo", O_RDONLY | O_CLOEXEC)
 
@@ -72,16 +66,13 @@
     extension ProcMeminfoMonitor: MemoryUsageMonitor {
         @inline(__always)
         var memoryUsage: Double {
+            let currentUsage = getCurrentMemoryUsage()
+
             guard currentUsage.total > 0 else {
                 return 0
             }
 
             return Double(currentUsage.total - currentUsage.available) / Double(currentUsage.total)
-        }
-
-        @inline(__always)
-        func updateMemoryUsage() async {
-            currentUsage = getCurrentMemoryUsage()
         }
     }
 #endif    // os(Linux)

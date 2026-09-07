@@ -1,4 +1,3 @@
-protocol MemoryUsageMonitor: Actor {
-    var memoryUsage: Double { get async }
-    func updateMemoryUsage() async
+protocol MemoryUsageMonitor: Sendable {
+    var memoryUsage: Double { get }
 }
