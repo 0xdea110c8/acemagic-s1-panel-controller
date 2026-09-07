@@ -1,4 +1,4 @@
-protocol USBDevice {
+protocol USBDevice: Sendable {
     init(vendorID: UInt16, productID: UInt16) throws
 
     func claimInterface(_ interface: Int32) throws
