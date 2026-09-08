@@ -44,6 +44,7 @@ enum IBMPlexMonoFont {
         case n9
         case n0
         case u32
+        case u45
         case u47
         case u58
     }
@@ -315,6 +316,13 @@ extension IBMPlexMonoFont.Glyph {
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 ]
 
+            case .u45:
+                return [
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ]
+
             case .u47:
                 return [
                     0x00, 0x02, 0x00, 0x30, 0x01, 0x00, 0x18, 0x00, 0x80, 0x08, 0x00, 0xC0,
@@ -370,6 +378,7 @@ extension IBMPlexMonoFont.Glyph {
             case "9": self = .n9
             case "0": self = .n0
             case " ": self = .u32
+            case "-": self = .u45
             case "/": self = .u47
             case ":": self = .u58
             default: throw GlyphError.noSymbol

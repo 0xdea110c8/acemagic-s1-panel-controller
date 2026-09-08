@@ -21,10 +21,12 @@ actor TextScreen {
     var timeRedrawTask: Task<Void, any Error>?
     var metricUpdateTask: Task<Void, any Error>?
 
+    var loadAverage: Int = 1000
     var cpuUsage: Int = 101
     var cpuTemperature: Int = 1000
     var memoryUsage: Int = 101
     var diskUsage: Int = 101
+    var wifiSignal: Int = 0
     var awgInterface: String? = ""
 
     var isRunning: Bool = false
@@ -70,11 +72,13 @@ extension TextScreen: ScreenRenderer {
 
         metricUpdateTask = Task {
             while !Task.isCancelled {
+                try await updateLoadAverage()
                 try await updateCPUUsage()
                 try await updateCPUTemperature()
                 try await updateMemoryUsage()
                 try await updateDiskUsage()
                 try await updateAWGInterfaceUsage()
+                try await updateWifiSignal()
 
                 try await Task.sleep(for: .seconds(1))
             }
@@ -116,12 +120,22 @@ extension TextScreen {
 }
 
 extension TextScreen {
-    func redrawUptime() async throws {
-        let uptimeStrings = await getUptimeStrings()
-        try updateText("UP", in: 0, at: 0, color: Color.green)
-        try updateText(uptimeStrings.days, in: 0, at: 5, color: Color.green)
-        try updateText(":\(uptimeStrings.hours)", in: 0, at: 8, color: Color.green)
-        try updateText(":\(uptimeStrings.minutes)", in: 0, at: 11, color: Color.green)
+    func updateLoadAverage() async throws {
+        let loadAverage = Int(await systemMonitor.loadAverage * 100)
+        if loadAverage != self.loadAverage {
+            let color: UInt16 =
+                switch loadAverage / 20 {
+                    case 0: Color.blue
+                    case 1: Color.green
+                    case 2: Color.yellow
+                    case 3: Color.orange
+                    default: Color.red
+                }
+
+            try updateText("LOAD", in: 0, at: 0, color: color)
+            try updateText("AVG", in: 0, at: 5, color: color)
+            try updateText(String(format: "%3d", loadAverage), in: 0, at: 11, color: color)
+        }
     }
 
     func updateCPUUsage() async throws {
@@ -195,10 +209,29 @@ extension TextScreen {
                     case 3: Color.orange
                     default: Color.red
                 }
-            try updateText("DSK", in: 4, at: 0, color: color)
-            try updateText("USA", in: 4, at: 4, color: color)
-            try updateText("GE", in: 4, at: 7, color: color)
+            try updateText("DISK", in: 4, at: 0, color: color)
+            try updateText("USA", in: 4, at: 5, color: color)
+            try updateText("GE", in: 4, at: 8, color: color)
             try updateText(String(format: "%3d", diskUsage), in: 4, at: 11, color: color)
+        }
+    }
+
+    func updateWifiSignal() async throws {
+        let wifiSignal = min(max(await systemMonitor.wifiSignal, -99), 0)
+
+        if wifiSignal != self.wifiSignal {
+            let color: UInt16 =
+                switch wifiSignal {
+                    case -50..<0: Color.blue
+                    case -60 ..< -50: Color.green
+                    case -67 ..< -60: Color.yellow
+                    case -80 ..< -67: Color.orange
+                    default: Color.red
+                }
+            debugPrint(wifiSignal)
+            try updateText("WIFI", in: 12, at: 0, color: color)
+            try updateText("SIG", in: 12, at: 5, color: color)
+            try updateText(String(format: "%ld", wifiSignal), in: 12, at: 11, color: color)
         }
     }
 
@@ -207,7 +240,7 @@ extension TextScreen {
         if isAWGLoaded {
             let awgInterface = await systemMonitor.awgInterfaces.first
             if awgInterface != self.awgInterface {
-                let color: UInt16 = awgInterface != nil ? Color.green : Color.blue
+                let color: UInt16 = awgInterface != nil ? Color.blue : Color.yellow
                 let state: String = awgInterface != nil ? "UP  " : "DOWN"
                 let interface: String =
                     if let awgInterface {
@@ -216,11 +249,20 @@ extension TextScreen {
                         "    "
                     }
 
-                try updateText("AWG", in: 14, at: 0, color: color)
-                try updateText(state, in: 14, at: 4, color: color)
-                try updateText(interface, in: 14, at: 10, color: color)
+                try updateText("AWG", in: 13, at: 0, color: color)
+                try updateText(state, in: 13, at: 4, color: color)
+                try updateText(interface, in: 13, at: 10, color: color)
             }
         }
+    }
+
+    func redrawUptime() async throws {
+        let color = Color.blue
+        let uptimeStrings = await getUptimeStrings()
+        try updateText("UP", in: 14, at: 0, color: color)
+        try updateText(uptimeStrings.days, in: 14, at: 5, color: color)
+        try updateText(":\(uptimeStrings.hours)", in: 14, at: 8, color: color)
+        try updateText(":\(uptimeStrings.minutes)", in: 14, at: 11, color: color)
     }
 
     func redrawDate() async throws {

@@ -1,27 +1,33 @@
 actor LinuxSystemMonitor {
+    let loadAverageMonitor: LoadAverageMonitor
     let cpuUsageMonitor: CPUUsageMonitor
     let cpuTemperatureMonitor: CPUTemperatureMonitor
     let memoryUsageMonitor: MemoryUsageMonitor
     let diskUsageMonitor: DiskUsageMonitor
     let uptimeMonitor: UptimeMonitor
+    let wifiSignalMonitor: WifiSignalMonitor
     let awgInterfacesMonitor: AWGInterfacesMonitor
 
     var updateMetricsTask: Task<Void, any Error>?
 
     init(
+        loadAverageMonitor: LoadAverageMonitor = ProcLoadavgMonitor(),
         cpuUsageMonitor: CPUUsageMonitor = ProcStatMonitor(),
         cpuTemperatureMonitor: CPUTemperatureMonitor = TempLabelMonitor(),
         memoryUsageMonitor: MemoryUsageMonitor = ProcMeminfoMonitor(),
         diskUsageMonitor: DiskUsageMonitor = StatVFSMonitor(),
         uptimeMonitor: UptimeMonitor = ProcUptimeMonitor(),
+        wifiSignalMonitor: WifiSignalMonitor = ProcNetWirelessMonitor(),
         awgInterfacesMonitor: AWGInterfacesMonitor = SysClassNetMonitor()
 
     ) {
+        self.loadAverageMonitor = loadAverageMonitor
         self.cpuUsageMonitor = cpuUsageMonitor
         self.cpuTemperatureMonitor = cpuTemperatureMonitor
         self.memoryUsageMonitor = memoryUsageMonitor
         self.diskUsageMonitor = diskUsageMonitor
         self.uptimeMonitor = uptimeMonitor
+        self.wifiSignalMonitor = wifiSignalMonitor
         self.awgInterfacesMonitor = awgInterfacesMonitor
     }
 
@@ -32,6 +38,10 @@ actor LinuxSystemMonitor {
 }
 
 extension LinuxSystemMonitor: SystemMonitor {
+    var loadAverage: Double {
+        loadAverageMonitor.loadAverage
+    }
+
     var cpuUsage: Double {
         get async {
             await cpuUsageMonitor.cpuUsage
@@ -56,6 +66,10 @@ extension LinuxSystemMonitor: SystemMonitor {
 
     var isAWGLoaded: Bool {
         awgInterfacesMonitor.isAWGModuleLoaded
+    }
+
+    var wifiSignal: Int {
+        wifiSignalMonitor.wifiSignal
     }
 
     var awgInterfaces: [String] {
