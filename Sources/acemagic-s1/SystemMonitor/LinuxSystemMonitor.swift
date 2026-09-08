@@ -5,6 +5,7 @@ actor LinuxSystemMonitor {
     let memoryUsageMonitor: MemoryUsageMonitor
     let diskUsageMonitor: DiskUsageMonitor
     let uptimeMonitor: UptimeMonitor
+    let wifiSignalMonitor: WifiSignalMonitor
     let awgInterfacesMonitor: AWGInterfacesMonitor
 
     var updateMetricsTask: Task<Void, any Error>?
@@ -16,6 +17,7 @@ actor LinuxSystemMonitor {
         memoryUsageMonitor: MemoryUsageMonitor = ProcMeminfoMonitor(),
         diskUsageMonitor: DiskUsageMonitor = StatVFSMonitor(),
         uptimeMonitor: UptimeMonitor = ProcUptimeMonitor(),
+        wifiSignalMonitor: WifiSignalMonitor = ProcNetWirelessMonitor(),
         awgInterfacesMonitor: AWGInterfacesMonitor = SysClassNetMonitor()
 
     ) {
@@ -25,6 +27,7 @@ actor LinuxSystemMonitor {
         self.memoryUsageMonitor = memoryUsageMonitor
         self.diskUsageMonitor = diskUsageMonitor
         self.uptimeMonitor = uptimeMonitor
+        self.wifiSignalMonitor = wifiSignalMonitor
         self.awgInterfacesMonitor = awgInterfacesMonitor
     }
 
@@ -36,9 +39,7 @@ actor LinuxSystemMonitor {
 
 extension LinuxSystemMonitor: SystemMonitor {
     var loadAverage: Double {
-        get async {
-            loadAverageMonitor.loadAverage
-        }
+        loadAverageMonitor.loadAverage
     }
 
     var cpuUsage: Double {
@@ -65,6 +66,10 @@ extension LinuxSystemMonitor: SystemMonitor {
 
     var isAWGLoaded: Bool {
         awgInterfacesMonitor.isAWGModuleLoaded
+    }
+
+    var wifiSignal: Int {
+        wifiSignalMonitor.wifiSignal
     }
 
     var awgInterfaces: [String] {

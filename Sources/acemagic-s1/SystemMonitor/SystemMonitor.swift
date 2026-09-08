@@ -6,6 +6,7 @@ protocol SystemMonitor: Actor {
     var diskUsage: Double { get async }
     var uptime: Double { get async }
     var isAWGLoaded: Bool { get async }
+    var wifiSignal: Int { get async }
     var awgInterfaces: [String] { get async }
 
     func startUpdatingMetrics() async
