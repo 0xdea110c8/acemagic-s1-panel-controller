@@ -22,10 +22,7 @@
                 )
 
                 guard count > 0 else {
-                    if count < 0 {
-                        perror("read")
-                    }
-
+                    perror("read")
                     return (0, 0)
                 }
 

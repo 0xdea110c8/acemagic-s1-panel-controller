@@ -21,6 +21,7 @@ actor TextScreen {
     var timeRedrawTask: Task<Void, any Error>?
     var metricUpdateTask: Task<Void, any Error>?
 
+    var loadAverage: Int = 1000
     var cpuUsage: Int = 101
     var cpuTemperature: Int = 1000
     var memoryUsage: Int = 101
@@ -70,6 +71,7 @@ extension TextScreen: ScreenRenderer {
 
         metricUpdateTask = Task {
             while !Task.isCancelled {
+                try await updateLoadAverage()
                 try await updateCPUUsage()
                 try await updateCPUTemperature()
                 try await updateMemoryUsage()
@@ -116,12 +118,22 @@ extension TextScreen {
 }
 
 extension TextScreen {
-    func redrawUptime() async throws {
-        let uptimeStrings = await getUptimeStrings()
-        try updateText("UP", in: 0, at: 0, color: Color.green)
-        try updateText(uptimeStrings.days, in: 0, at: 5, color: Color.green)
-        try updateText(":\(uptimeStrings.hours)", in: 0, at: 8, color: Color.green)
-        try updateText(":\(uptimeStrings.minutes)", in: 0, at: 11, color: Color.green)
+    func updateLoadAverage() async throws {
+        let loadAverage = Int(await systemMonitor.loadAverage * 100)
+        if loadAverage != self.loadAverage {
+            let color: UInt16 =
+                switch loadAverage / 20 {
+                    case 0: Color.blue
+                    case 1: Color.green
+                    case 2: Color.yellow
+                    case 3: Color.orange
+                    default: Color.red
+                }
+
+            try updateText("LOAD", in: 0, at: 0, color: color)
+            try updateText("AVG", in: 0, at: 5, color: color)
+            try updateText(String(format: "%3d", loadAverage), in: 0, at: 11, color: color)
+        }
     }
 
     func updateCPUUsage() async throws {
@@ -216,11 +228,19 @@ extension TextScreen {
                         "    "
                     }
 
-                try updateText("AWG", in: 14, at: 0, color: color)
-                try updateText(state, in: 14, at: 4, color: color)
-                try updateText(interface, in: 14, at: 10, color: color)
+                try updateText("AWG", in: 13, at: 0, color: color)
+                try updateText(state, in: 13, at: 4, color: color)
+                try updateText(interface, in: 13, at: 10, color: color)
             }
         }
+    }
+
+    func redrawUptime() async throws {
+        let uptimeStrings = await getUptimeStrings()
+        try updateText("UP", in: 14, at: 0, color: Color.green)
+        try updateText(uptimeStrings.days, in: 14, at: 5, color: Color.green)
+        try updateText(":\(uptimeStrings.hours)", in: 14, at: 8, color: Color.green)
+        try updateText(":\(uptimeStrings.minutes)", in: 14, at: 11, color: Color.green)
     }
 
     func redrawDate() async throws {

@@ -1,4 +1,5 @@
 actor LinuxSystemMonitor {
+    let loadAverageMonitor: LoadAverageMonitor
     let cpuUsageMonitor: CPUUsageMonitor
     let cpuTemperatureMonitor: CPUTemperatureMonitor
     let memoryUsageMonitor: MemoryUsageMonitor
@@ -9,6 +10,7 @@ actor LinuxSystemMonitor {
     var updateMetricsTask: Task<Void, any Error>?
 
     init(
+        loadAverageMonitor: LoadAverageMonitor = ProcLoadavgMonitor(),
         cpuUsageMonitor: CPUUsageMonitor = ProcStatMonitor(),
         cpuTemperatureMonitor: CPUTemperatureMonitor = TempLabelMonitor(),
         memoryUsageMonitor: MemoryUsageMonitor = ProcMeminfoMonitor(),
@@ -17,6 +19,7 @@ actor LinuxSystemMonitor {
         awgInterfacesMonitor: AWGInterfacesMonitor = SysClassNetMonitor()
 
     ) {
+        self.loadAverageMonitor = loadAverageMonitor
         self.cpuUsageMonitor = cpuUsageMonitor
         self.cpuTemperatureMonitor = cpuTemperatureMonitor
         self.memoryUsageMonitor = memoryUsageMonitor
@@ -32,6 +35,12 @@ actor LinuxSystemMonitor {
 }
 
 extension LinuxSystemMonitor: SystemMonitor {
+    var loadAverage: Double {
+        get async {
+            loadAverageMonitor.loadAverage
+        }
+    }
+
     var cpuUsage: Double {
         get async {
             await cpuUsageMonitor.cpuUsage

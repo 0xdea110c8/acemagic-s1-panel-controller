@@ -1,4 +1,5 @@
 protocol SystemMonitor: Actor {
+    var loadAverage: Double { get async }
     var cpuUsage: Double { get async }
     var cpuTemperature: Double { get async }
     var memoryUsage: Double { get async }
