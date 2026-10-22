@@ -2,17 +2,15 @@ import Foundation
 import Glibc
 
 protocol ControlsDisplay {
-    func closeDisplay()
+    func prepareForTermination()
 }
 
-final class DisplayController: ControlsDisplay, @unchecked Sendable {
+protocol DrawsContent {
+}
+
+final class DisplayController: @unchecked Sendable {
     private static let displaySerialLane = DispatchQueue(
         label: "acemagic-s1.lane.serial.display",
-        target: .global(qos: .default)
-    )
-
-    private static let displayResurrectorSerialLane = DispatchQueue(
-        label: "acemagic-s1.lane.serial.resurrector.display",
         target: .global(qos: .default)
     )
 
@@ -45,18 +43,13 @@ final class DisplayController: ControlsDisplay, @unchecked Sendable {
         prepareDisplay()
     }
 
-    func closeDisplay() {
-        closeDisplay(facedErrorWhileOpening: false)
-    }
-
     private func prepareDisplay() {
-        DisplayController.displaySerialLane.async { [self] in
-            open()
-            detachKernelDriver()
-            claimInterface()
-            state.isAllowedToWrite = true
-            setDisplayResurrector()
-        }
+        open()
+        detachKernelDriver()
+        claimInterface()
+        state.isAllowedToWrite = true
+        logEvent(.allowedToWrite)
+        setDisplayResurrector()
     }
 
     private func open() {
@@ -106,17 +99,13 @@ final class DisplayController: ControlsDisplay, @unchecked Sendable {
     }
 
     private func closeDisplay(facedErrorWhileOpening: Bool) {
-        deactivateDisplayResurrector()
-        state.isAllowedToWrite = false
-        DisplayController.displaySerialLane.async { [self] in
-            releaseInterface()
-            attachKernelDriver()
-            close()
-            if facedErrorWhileOpening {
-                delegate.facedErrorWhileOpening()
-            } else {
-                delegate.displayClosed()
-            }
+        releaseInterface()
+        attachKernelDriver()
+        close()
+        if facedErrorWhileOpening {
+            delegate.facedErrorWhileOpening()
+        } else {
+            delegate.displayClosed()
         }
     }
 
@@ -151,34 +140,21 @@ final class DisplayController: ControlsDisplay, @unchecked Sendable {
     }
 
     private func setDisplayResurrector() {
-        DisplayController.displayResurrectorSerialLane.async { [self] in
-            let displayResurrector = DispatchSource.makeTimerSource(queue: DisplayController.displaySerialLane)
-            displayResurrector.schedule(deadline: .now(), repeating: 1, leeway: .milliseconds(50))
-            displayResurrector.setEventHandler { [self] in
-                let time = Calendar.current.timeComponents()
-                setTime(time.hour, time.minute, time.second)
-            }
-            displayResurrector.activate()
-            logEvent(.resurrectorActivated)
-            self.displayResurrector = displayResurrector
-        }
-    }
-
-    private func setTime(_ hour: Int, _ minute: Int, _ second: Int) {
-        execute {
-            if state.isReady, let handle {
-                let packet = DisplayPacket.time(hour, minute, second)
-                try USBHID.interruptWrite(packet, handle: handle, to: endpoint, with: timeout)
-                logEvent(.packetSent(packet))
+        let displayResurrector = DispatchSource.makeTimerSource(queue: DisplayController.displaySerialLane)
+        displayResurrector.schedule(deadline: .now(), repeating: 1, leeway: .milliseconds(50))
+        displayResurrector.setEventHandler { [self] in
+            let time = Calendar.current.timeComponents()
+            execute {
+                if state.isReady, let handle {
+                    let packet = DisplayPacket.time(time.hour, time.minute, time.second)
+                    try USBHID.interruptWrite(packet, handle: handle, to: endpoint, with: timeout)
+                    logEvent(.packetSent(packet))
+                }
             }
         }
-    }
-
-    private func deactivateDisplayResurrector() {
-        DisplayController.displaySerialLane.async { [self] in
-            displayResurrector?.cancel()
-            logEvent(.resurrectorDeactivated)
-        }
+        displayResurrector.activate()
+        logEvent(.resurrectorActivated)
+        self.displayResurrector = displayResurrector
     }
 
     private func execute(_ block: () throws -> Void, onFailure: ((Bool) -> Void)? = nil) {
@@ -204,6 +180,19 @@ final class DisplayController: ControlsDisplay, @unchecked Sendable {
     private func logUnknownUSBError(_ error: Error) {
         Logger.log(deviceString, error)
     }
+}
+
+extension DisplayController: ControlsDisplay {
+    func prepareForTermination() {
+        state.isAllowedToWrite = false
+        logEvent(.disallowedToWrite)
+        displayResurrector?.cancel()
+        logEvent(.resurrectorDeactivated)
+        closeDisplay(facedErrorWhileOpening: false)
+    }
+}
+
+extension DisplayController: DrawsContent {
 }
 
 extension DisplayController {
@@ -315,6 +304,8 @@ extension DisplayController {
         case interfaceClaimed(Int32)
         case interfaceReleased(Int32)
         case kernelDriverAttached(Int32)
+        case allowedToWrite
+        case disallowedToWrite
         case transferred(Int)
         case closed
         case packetSent([UInt8])
@@ -335,6 +326,10 @@ extension DisplayController {
                     return "released interface \(interface)"
                 case .kernelDriverAttached(let interface):
                     return "attached kernel driver on interface \(interface)"
+                case .allowedToWrite:
+                    return "allowed to write"
+                case .disallowedToWrite:
+                    return "disallowed to write"
                 case .transferred(let count):
                     return "transferred \(count) bytes"
                 case .closed:

@@ -53,7 +53,7 @@ final class Application: @unchecked Sendable {
 
     func receivedTerminationSignal() {
         state.insert(.isTerminating)
-        displayController?.closeDisplay()
+        displayController?.prepareForTermination()
     }
 
     func checkTerminationPossibility() {
@@ -78,10 +78,8 @@ extension Application: DisplayControllerDelegate {
     }
 
     func displayClosed() {
-        DispatchQueue.main.async { [self] in
-            state.insert(.isDisplayClosed)
-            checkTerminationPossibility()
-        }
+        state.insert(.isDisplayClosed)
+        checkTerminationPossibility()
     }
 }
 
