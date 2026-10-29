@@ -21,14 +21,25 @@ let package = Package(
             name: "CLibUSB",
             pkgConfig: "libusb-1.0",
         ),
+        .target(
+            name: "SysInfo",
+            path: "Sources/SysInfo",
+            swiftSettings: [.interoperabilityMode(.Cxx)]
+        ),
         .executableTarget(
             name: "acemagic-s1",
             dependencies: [
                 .targetItem(
                     name: "CLibUSB",
                     condition: .when(platforms: [.linux])
-                )
-            ]
+                ),
+                .targetItem(
+                    name: "SysInfo",
+                    condition: .when(platforms: [.linux])
+                ),
+            ],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
-    ]
+    ],
+    cxxLanguageStandard: .cxx20
 )

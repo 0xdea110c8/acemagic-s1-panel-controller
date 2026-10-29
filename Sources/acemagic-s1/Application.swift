@@ -21,21 +21,6 @@ final class Application: @unchecked Sendable {
     func launch() {
         overrideTerminationSignal(SIGINT, &sigint)
         overrideTerminationSignal(SIGTERM, &sigterm)
-        createDisplayController()
-        stopMainThread()
-    }
-
-    @inline(__always)
-    func overrideTerminationSignal(_ _signal: Int32, _ overridenSignal: inout DispatchSourceSignal?) {
-        signal(_signal, SIG_IGN)
-        let signal = DispatchSource.makeSignalSource(signal: _signal, queue: .main)
-        signal.setEventHandler { [self] in receivedTerminationSignal() }
-        signal.activate()
-        overridenSignal = signal
-    }
-
-    @inline(__always)
-    func createDisplayController() {
         displayController = DisplayController(
             vendorId: 0x04D9,
             productId: 0x0FD01,
@@ -44,24 +29,26 @@ final class Application: @unchecked Sendable {
             timeout: 2_000,
             delegate: self
         )
-    }
-
-    @inline(__always)
-    func stopMainThread() {
         dispatchMain()
     }
 
-    func receivedTerminationSignal() {
-        state.insert(.isTerminating)
-        displayController?.prepareForTermination()
+    func overrideTerminationSignal(_ __sig: Int32, _ _signal: inout DispatchSourceSignal?) {
+        signal(__sig, SIG_IGN)
+        let signal = DispatchSource.makeSignalSource(signal: __sig, queue: .main)
+        signal.setEventHandler { [self] in
+            state.insert(.isTerminating)
+            displayController?.prepareForTermination()
+        }
+        signal.activate()
+        _signal = signal
     }
 
     func checkTerminationPossibility() {
         let isTerminating = state.contains(.isTerminating)
-        let isTerminatingOnError = state.contains(.isTerminatingOnError)
         let isDisplayClosed = state.contains(.isDisplayClosed)
 
         if isTerminating && isDisplayClosed {
+            let isTerminatingOnError = state.contains(.isTerminatingOnError)
             exit(isTerminatingOnError.int32Value)
         }
     }

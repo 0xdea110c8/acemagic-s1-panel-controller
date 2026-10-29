@@ -8,7 +8,7 @@ protocol ControlsDisplay {
 protocol DrawsContent {
 }
 
-final class DisplayController: @unchecked Sendable {
+final class DisplayController: ControlsDisplay, @unchecked Sendable {
     private static let displaySerialLane = DispatchQueue(
         label: "acemagic-s1.lane.serial.display",
         target: .global(qos: .default)
@@ -43,12 +43,20 @@ final class DisplayController: @unchecked Sendable {
         prepareDisplay()
     }
 
+    func prepareForTermination() {
+        state.isAllowedToWrite = false
+        log(.disallowedToWrite)
+        displayResurrector?.cancel()
+        log(.resurrectorDeactivated)
+        closeDisplay(facedErrorWhileOpening: false)
+    }
+
     private func prepareDisplay() {
         open()
         detachKernelDriver()
         claimInterface()
         state.isAllowedToWrite = true
-        logEvent(.allowedToWrite)
+        log(.allowedToWrite)
         setDisplayResurrector()
     }
 
@@ -60,7 +68,7 @@ final class DisplayController: @unchecked Sendable {
                     handle = result.handle
                     context = result.context
                     state.isOpen = true
-                    logEvent(.opened)
+                    log(.opened)
                 }
             },
             onFailure: closeDisplay
@@ -74,10 +82,10 @@ final class DisplayController: @unchecked Sendable {
                     let hadKernelDriverAttached = try USBHID.detachKernelDriver(interface, handle: handle)
                     if hadKernelDriverAttached {
                         state.isKernelDriverDetached = true
-                        logEvent(.kernelDriverDetached(interface))
+                        log(.kernelDriverDetached(interface))
                     } else {
                         state.hasNoKernelDriver = true
-                        logEvent(.hadNoKernelDriver(interface))
+                        log(.hadNoKernelDriver(interface))
                     }
                 }
             },
@@ -91,7 +99,7 @@ final class DisplayController: @unchecked Sendable {
                 if state.isReadytoClaimInterface, let handle {
                     try USBHID.claimInterface(interface, handle: handle)
                     state.isInterfaceClaimed = true
-                    logEvent(.interfaceClaimed(interface))
+                    log(.interfaceClaimed(interface))
                 }
             },
             onFailure: closeDisplay
@@ -114,7 +122,7 @@ final class DisplayController: @unchecked Sendable {
             if state.isInterfaceClaimed, let handle {
                 try USBHID.releaseInterface(interface, handle: handle)
                 state.isInterfaceClaimed = false
-                logEvent(.interfaceReleased(interface))
+                log(.interfaceReleased(interface))
             }
         }
     }
@@ -124,7 +132,7 @@ final class DisplayController: @unchecked Sendable {
             if state.isKernelDriverDetached, let handle {
                 try USBHID.attachKernelDriver(interface, handle: handle)
                 state.isKernelDriverDetached = false
-                logEvent(.kernelDriverAttached(interface))
+                log(.kernelDriverAttached(interface))
             }
         }
     }
@@ -134,7 +142,7 @@ final class DisplayController: @unchecked Sendable {
             if state.isOpen, let handle, let context {
                 USBHID.close(handle: handle, context: context)
                 state.isOpen = false
-                logEvent(.closed)
+                log(.closed)
             }
         }
     }
@@ -148,12 +156,12 @@ final class DisplayController: @unchecked Sendable {
                 if state.isReady, let handle {
                     let packet = DisplayPacket.time(time.hour, time.minute, time.second)
                     try USBHID.interruptWrite(packet, handle: handle, to: endpoint, with: timeout)
-                    logEvent(.packetSent(packet))
+                    log(.packetSent(packet))
                 }
             }
         }
         displayResurrector.activate()
-        logEvent(.resurrectorActivated)
+        log(.resurrectorActivated)
         self.displayResurrector = displayResurrector
     }
 
@@ -161,34 +169,24 @@ final class DisplayController: @unchecked Sendable {
         do {
             try block()
         } catch let error as USBHID.USBHIDError {
-            logUSBError(error)
+            log(error)
             onFailure?(true)
         } catch {
-            logUnknownUSBError(error)
+            log(error)
             onFailure?(true)
         }
     }
 
-    private func logEvent(_ event: Event) {
-        Logger.log(deviceString, event)
+    private func log(_ event: Event) {
+        Logger.log(deviceString, event, in: .debug)
     }
 
-    private func logUSBError(_ error: USBHID.USBHIDError) {
-        Logger.log(deviceString, error)
+    private func log(_ error: USBHID.USBHIDError) {
+        Logger.log(deviceString, error, in: .prod)
     }
 
-    private func logUnknownUSBError(_ error: Error) {
-        Logger.log(deviceString, error)
-    }
-}
-
-extension DisplayController: ControlsDisplay {
-    func prepareForTermination() {
-        state.isAllowedToWrite = false
-        logEvent(.disallowedToWrite)
-        displayResurrector?.cancel()
-        logEvent(.resurrectorDeactivated)
-        closeDisplay(facedErrorWhileOpening: false)
+    private func log(_ error: Error) {
+        Logger.log(deviceString, error, in: .prod)
     }
 }
 
