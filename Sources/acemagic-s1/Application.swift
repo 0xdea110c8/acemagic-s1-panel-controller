@@ -9,7 +9,8 @@ protocol DisplayControllerDelegate: AnyObject {
 @main
 final class Application: @unchecked Sendable {
     var state = State()
-    var displayController: ControlsDisplay?
+    var displayController: DisplayController!
+    var screen: TextScreen?
     var sigint: DispatchSourceSignal?
     var sigterm: DispatchSourceSignal?
 
@@ -29,6 +30,7 @@ final class Application: @unchecked Sendable {
             timeout: 2_000,
             delegate: self
         )
+        screen = TextScreen(drawer: displayController)
         dispatchMain()
     }
 

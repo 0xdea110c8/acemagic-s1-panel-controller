@@ -6,11 +6,22 @@ protocol ControlsDisplay {
 }
 
 protocol DrawsContent {
+    static var displayWidth: Int { get }
+    static var displayHeight: Int { get }
+    static var bytesInPixel: Int { get }
+    static func getRedrawBuffer(color: UInt16) -> [UInt8]
+    static func getUpdateBuffer(count: Int, color: UInt16) -> [UInt8]
+    func draw(_ buffer: [UInt8])
+    func update(x: Int, y: Int, width: Int, height: Int, buffer: [UInt8])
 }
 
-final class DisplayController: ControlsDisplay, @unchecked Sendable {
+final class DisplayController: @unchecked Sendable {
     private static let displaySerialLane = DispatchQueue(
         label: "acemagic-s1.lane.serial.display",
+        target: .global(qos: .default)
+    )
+    private static let displayResurrectorSerialLane = DispatchQueue(
+        label: "acemagic-s1.lane.serial.display.resurrector",
         target: .global(qos: .default)
     )
 
@@ -20,7 +31,7 @@ final class DisplayController: ControlsDisplay, @unchecked Sendable {
     private let interface: Int32
     private let endpoint: UInt8
     private let timeout: UInt32
-    private unowned var delegate: DisplayControllerDelegate
+    private unowned var delegate: any DisplayControllerDelegate
     private lazy var deviceString: String = { "Display (USB device \(vendorId):\(productId))\t" }()
     private var handle: OpaquePointer?
     private var context: OpaquePointer?
@@ -32,7 +43,7 @@ final class DisplayController: ControlsDisplay, @unchecked Sendable {
         interface: Int32,
         endpoint: UInt8,
         timeout: UInt32,
-        delegate: DisplayControllerDelegate
+        delegate: any DisplayControllerDelegate
     ) {
         self.vendorId = vendorId
         self.productId = productId
@@ -40,137 +51,118 @@ final class DisplayController: ControlsDisplay, @unchecked Sendable {
         self.endpoint = endpoint
         self.timeout = timeout
         self.delegate = delegate
-        prepareDisplay()
+        openDisplay()
     }
 
-    func prepareForTermination() {
-        state.isAllowedToWrite = false
-        log(.disallowedToWrite)
-        displayResurrector?.cancel()
-        log(.resurrectorDeactivated)
-        closeDisplay(facedErrorWhileOpening: false)
-    }
-
-    private func prepareDisplay() {
-        open()
-        detachKernelDriver()
-        claimInterface()
-        state.isAllowedToWrite = true
-        log(.allowedToWrite)
-        setDisplayResurrector()
-    }
-
-    private func open() {
-        execute(
-            {
-                if !state.isOpen {
-                    let result = try USBHID.open(vendorId: vendorId, productId: productId)
-                    handle = result.handle
-                    context = result.context
-                    state.isOpen = true
-                    log(.opened)
-                }
-            },
-            onFailure: closeDisplay
-        )
-    }
-
-    private func detachKernelDriver() {
-        execute(
-            {
-                if state.isOpen, let handle {
-                    let hadKernelDriverAttached = try USBHID.detachKernelDriver(interface, handle: handle)
-                    if hadKernelDriverAttached {
-                        state.isKernelDriverDetached = true
-                        log(.kernelDriverDetached(interface))
-                    } else {
-                        state.hasNoKernelDriver = true
-                        log(.hadNoKernelDriver(interface))
+    private func openDisplay() {
+        DisplayController.displaySerialLane.async { [self] in
+            execute(
+                {
+                    // open display
+                    if !state.isOpen {
+                        let result = try USBHID.open(vendorId: vendorId, productId: productId)
+                        handle = result.handle
+                        context = result.context
+                        state.isOpen = true
+                        log(.opened)
                     }
-                }
-            },
-            onFailure: closeDisplay
-        )
-    }
-
-    private func claimInterface() {
-        execute(
-            {
-                if state.isReadytoClaimInterface, let handle {
-                    try USBHID.claimInterface(interface, handle: handle)
-                    state.isInterfaceClaimed = true
-                    log(.interfaceClaimed(interface))
-                }
-            },
-            onFailure: closeDisplay
-        )
+                    if let handle {
+                        // detach kernel driver
+                        if state.isOpen {
+                            let hadKernelDriverAttached = try USBHID.detachKernelDriver(interface, handle: handle)
+                            if hadKernelDriverAttached {
+                                state.isKernelDriverDetached = true
+                                log(.kernelDriverDetached(interface))
+                            } else {
+                                state.hasNoKernelDriver = true
+                                log(.hadNoKernelDriver(interface))
+                            }
+                        }
+                        // claim interface
+                        if state.isReadytoClaimInterface {
+                            try USBHID.claimInterface(interface, handle: handle)
+                            state.isInterfaceClaimed = true
+                            log(.interfaceClaimed(interface))
+                        }
+                        // allow to send packets
+                        state.isAllowedToWrite = true
+                        log(.allowedToWrite)
+                        // set display resurrector
+                        let displayResurrector = DispatchSource.makeTimerSource(
+                            queue: DisplayController.displayResurrectorSerialLane
+                        )
+                        displayResurrector.schedule(deadline: .now(), repeating: 1.0, leeway: .milliseconds(50))
+                        displayResurrector.setEventHandler { [weak self] in
+                            let time = Calendar.current.timeComponents()
+                            let packet = DisplayPacket.time(time.hour, time.minute, time.second)
+                            self?.interruptWrite(packet)
+                        }
+                        displayResurrector.activate()
+                        log(.resurrectorActivated)
+                        self.displayResurrector = displayResurrector
+                    }
+                },
+                onFailure: closeDisplay
+            )
+        }
     }
 
     private func closeDisplay(facedErrorWhileOpening: Bool) {
-        releaseInterface()
-        attachKernelDriver()
-        close()
-        if facedErrorWhileOpening {
-            delegate.facedErrorWhileOpening()
-        } else {
-            delegate.displayClosed()
+        // forbid to send packets
+        if state.isAllowedToWrite {
+            state.isAllowedToWrite = false
+            log(.disallowedToWrite)
         }
-    }
-
-    private func releaseInterface() {
-        execute {
-            if state.isInterfaceClaimed, let handle {
-                try USBHID.releaseInterface(interface, handle: handle)
-                state.isInterfaceClaimed = false
-                log(.interfaceReleased(interface))
+        DisplayController.displaySerialLane.async { [self] in
+            // cancel display resurrector
+            if let displayResurrector {
+                displayResurrector.cancel()
+                log(.resurrectorDeactivated)
+            }
+            execute {
+                if let handle {
+                    // release interface
+                    if state.isInterfaceClaimed {
+                        try USBHID.releaseInterface(interface, handle: handle)
+                        state.isInterfaceClaimed = false
+                        log(.interfaceReleased(interface))
+                    }
+                    // attach kernel driver back
+                    if state.isKernelDriverDetached {
+                        try USBHID.attachKernelDriver(interface, handle: handle)
+                        state.isKernelDriverDetached = false
+                        log(.kernelDriverAttached(interface))
+                    }
+                    // close display
+                    if state.isOpen, let context {
+                        USBHID.close(handle: handle, context: context)
+                        state.isOpen = false
+                        log(.closed)
+                    }
+                }
+            }
+            if facedErrorWhileOpening {
+                delegate.facedErrorWhileOpening()
+            } else {
+                delegate.displayClosed()
             }
         }
     }
 
-    private func attachKernelDriver() {
-        execute {
-            if state.isKernelDriverDetached, let handle {
-                try USBHID.attachKernelDriver(interface, handle: handle)
-                state.isKernelDriverDetached = false
-                log(.kernelDriverAttached(interface))
-            }
-        }
-    }
-
-    private func close() {
-        execute {
-            if state.isOpen, let handle, let context {
-                USBHID.close(handle: handle, context: context)
-                state.isOpen = false
-                log(.closed)
-            }
-        }
-    }
-
-    private func setDisplayResurrector() {
-        let displayResurrector = DispatchSource.makeTimerSource(queue: DisplayController.displaySerialLane)
-        displayResurrector.schedule(deadline: .now(), repeating: 1, leeway: .milliseconds(50))
-        displayResurrector.setEventHandler { [self] in
-            let time = Calendar.current.timeComponents()
+    private func interruptWrite(_ packet: [UInt8]) {
+        DisplayController.displaySerialLane.async { [self] in
             execute {
                 if state.isReady, let handle {
-                    let packet = DisplayPacket.time(time.hour, time.minute, time.second)
                     try USBHID.interruptWrite(packet, handle: handle, to: endpoint, with: timeout)
                     log(.packetSent(packet))
                 }
             }
         }
-        displayResurrector.activate()
-        log(.resurrectorActivated)
-        self.displayResurrector = displayResurrector
     }
 
     private func execute(_ block: () throws -> Void, onFailure: ((Bool) -> Void)? = nil) {
         do {
             try block()
-        } catch let error as USBHID.USBHIDError {
-            log(error)
-            onFailure?(true)
         } catch {
             log(error)
             onFailure?(true)
@@ -181,20 +173,108 @@ final class DisplayController: ControlsDisplay, @unchecked Sendable {
         Logger.log(deviceString, event, in: .debug)
     }
 
-    private func log(_ error: USBHID.USBHIDError) {
-        Logger.log(deviceString, error, in: .prod)
-    }
-
     private func log(_ error: Error) {
         Logger.log(deviceString, error, in: .prod)
     }
 }
 
+extension DisplayController: ControlsDisplay {
+    func prepareForTermination() {
+        closeDisplay(facedErrorWhileOpening: false)
+    }
+}
+
 extension DisplayController: DrawsContent {
+    static let displayWidth: Int = 170
+    static let displayHeight: Int = 320
+    static let bytesInPixel: Int = 2
+
+    static func getRedrawBuffer(color: UInt16) -> [UInt8] {
+        getUpdateBuffer(count: DisplayController.displayWidth * DisplayController.displayHeight, color: color)
+    }
+
+    static func getUpdateBuffer(count: Int, color: UInt16) -> [UInt8] {
+        let high = UInt8(color >> 8)
+        let low = UInt8(color & 0x00FF)
+        return Array(
+            repeating: [high, low],
+            count: count
+        )
+        .flatMap { $0 }
+    }
+
+    func draw(_ buffer: [UInt8]) {
+        precondition(
+            buffer.count == DisplayController.displayWidth * DisplayController.displayHeight
+                * DisplayController.bytesInPixel
+        )
+        DisplayController.splitIntoPackets(buffer)
+            .forEach { packet in
+                DisplayController.displaySerialLane.async { [weak self] in
+                    self?.interruptWrite(packet)
+                }
+            }
+    }
+
+    func update(x: Int, y: Int, width: Int, height: Int, buffer: [UInt8]) {
+        DisplayController.displaySerialLane.async { [weak self] in
+            self?
+                .interruptWrite(
+                    DisplayPacket.update(
+                        x: x,
+                        y: y,
+                        width: width,
+                        height: height,
+                        buffer: buffer
+                    )
+                )
+        }
+    }
+
+    private static func splitIntoPackets(_ buffer: [UInt8]) -> [[UInt8]] {
+        var packets: [[UInt8]] = []
+        packets.reserveCapacity(27)
+
+        var chunk = 1
+        var offset = 0
+
+        while offset < buffer.count {
+            let length = min(4096, buffer.count - offset)
+            switch chunk {
+                case 1:
+                    packets.append(
+                        DisplayPacket.startRedraw(
+                            chunk: chunk,
+                            offset: offset,
+                            buffer: Array(buffer[offset..<offset + length])
+                        )
+                    )
+                case 27:
+                    packets.append(
+                        DisplayPacket.finishRedraw(
+                            chunk: chunk,
+                            offset: offset,
+                            buffer: Array(buffer[offset..<offset + length])
+                        )
+                    )
+                default:
+                    packets.append(
+                        DisplayPacket.continueRedraw(
+                            chunk: chunk,
+                            offset: offset,
+                            buffer: Array(buffer[offset..<offset + length])
+                        )
+                    )
+            }
+            chunk += 1
+            offset += length
+        }
+        return packets
+    }
 }
 
 extension DisplayController {
-    class State: @unchecked Sendable {
+    private class State: @unchecked Sendable {
         static let displayStateLane = DispatchQueue(
             label: "acemagic-s1.lane.concurrent.state.display",
             attributes: .concurrent,
@@ -295,7 +375,7 @@ extension DisplayController {
 }
 
 extension DisplayController {
-    enum Event: CustomStringConvertible {
+    private enum Event: CustomStringConvertible {
         case opened
         case kernelDriverDetached(Int32)
         case hadNoKernelDriver(Int32)

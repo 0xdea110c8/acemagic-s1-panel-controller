@@ -6,7 +6,7 @@ enum Logger {
 
     static func log(
         _ items: Any...,
-        in: Mode,
+        in mode: Mode,
         separator: String = " ",
         terminator: String = "\n"
     ) {

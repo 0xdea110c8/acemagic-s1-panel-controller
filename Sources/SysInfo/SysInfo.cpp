@@ -57,8 +57,8 @@ RamData get_ram_info() {
         double free_ram = static_cast<double>(info.freeram);
         double total_swap = static_cast<double>(info.totalswap);
         double free_swap = static_cast<double>(info.freeswap);
-        result.ram_free_percent = (total_ram > 0) ? static_cast<int>((free_ram / total_ram) * 100.0) : 0;
-        result.swap_free_percent = (total_swap > 0) ? static_cast<int>((free_swap/ total_swap) * 100.0) : 0;
+        result.ram_free_percent = (total_ram > 0) ? static_cast<int>(((total_ram - free_ram) / total_ram) * 100.0) : 0;
+        result.swap_free_percent = (total_swap > 0) ? static_cast<int>(((total_swap - free_swap) / total_swap) * 100.0) : 0;
         result.uptime = static_cast<int>(info.uptime);
     }
     
@@ -70,7 +70,7 @@ int get_disk_usage() {
     if (statvfs("/", &vfs) == 0) {
         double total_blocks = static_cast<double>(vfs.f_blocks);   
         double available_blocks = static_cast<double>(vfs.f_bavail);
-        return (total_blocks > 0) ? static_cast<int>((available_blocks / total_blocks) * 100.0) : 0;
+        return (total_blocks > 0) ? static_cast<int>(((total_blocks - available_blocks) / total_blocks) * 100.0) : 0;
     }
     return 0;
 }
