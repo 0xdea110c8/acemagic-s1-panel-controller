@@ -87,6 +87,7 @@ struct AWGMetricLine: StringLiveLine {
     private var currentColor: RGB565
     private let valueGetter: () -> [String]
     private let color: RGB565
+    private let down: String = "DOWN"
 
     var stringRepresentation: String {
         let paddedName = name.padding(toLength: 10, withPad: " ", startingAt: 0)
@@ -97,7 +98,7 @@ struct AWGMetricLine: StringLiveLine {
         valueGetter: @escaping @autoclosure () -> [String],
         color: RGB565
     ) {
-        self.currentValue = "DOWN"
+        self.currentValue = down
         self.currentColor = color
         self.valueGetter = valueGetter
         self.color = color
@@ -106,8 +107,20 @@ struct AWGMetricLine: StringLiveLine {
     mutating func update() -> [LineUpdate] {
         var updates: [LineUpdate] = []
         let newValues = valueGetter()
-        guard let newValue = newValues.first, newValue != currentValue else { return updates }
-        updates.append(LineUpdate(index: 10, value: String(newValue.prefix(4)), color: currentColor))
+        guard newValues.isEmpty else {
+            let newValue = newValues[0]
+            defer { currentValue = newValue }
+            if newValue == currentValue {
+                return updates
+            }
+            updates.append(LineUpdate(index: 10, value: String(newValue.prefix(4)), color: currentColor))
+            return updates
+        }
+        guard currentValue == down else {
+            currentValue = down
+            updates.append(LineUpdate(index: 10, value: down, color: currentColor))
+            return updates
+        }
         return updates
     }
 }

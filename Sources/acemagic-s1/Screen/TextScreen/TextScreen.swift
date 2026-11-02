@@ -55,7 +55,7 @@ final class TextScreen: @unchecked Sendable {
                 warningColor: RGB565.yellow,
                 warningRange: 80..<95,
                 criticalColor: RGB565.red,
-                criticalRange: 95...150
+                criticalRange: 95...200
             ),
             IntMetricLine(
                 name: "RAM",
@@ -91,7 +91,7 @@ final class TextScreen: @unchecked Sendable {
                 warningColor: RGB565.yellow,
                 warningRange: -75 ..< -66,
                 criticalColor: RGB565.red,
-                criticalRange: -200 ... -75
+                criticalRange: -1000 ... -75
             ),
             AWGMetricLine(
                 valueGetter: self.monitor.awgInterfaces,
@@ -211,7 +211,7 @@ final class TextScreen: @unchecked Sendable {
                 }
             }
         }
-        lineUpdater.schedule(deadline: .now() + 1.0, repeating: 1.0, leeway: .milliseconds(50))
+        lineUpdater.schedule(deadline: .now() + 2.0, repeating: 1.0, leeway: .milliseconds(50))
         lineUpdater.activate()
         self.lineUpdater = lineUpdater
     }
