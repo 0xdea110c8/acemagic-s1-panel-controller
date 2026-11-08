@@ -149,7 +149,7 @@ final class TextScreen: @unchecked Sendable {
                 }
                 pixel -= height * bytesInPixel * font.advance
             } catch {
-                #warning("handle bitmap error")
+                fatalError("No bitmap for char \(char) in \(font)")
             }
         }
     }
@@ -175,7 +175,7 @@ final class TextScreen: @unchecked Sendable {
                 }
                 pixel -= font.height * bytesInPixel * font.advance
             } catch {
-                #warning("handle bitmap error")
+                fatalError("No bitmap for char \(char) in \(font)")
             }
         }
     }
