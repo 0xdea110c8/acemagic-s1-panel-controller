@@ -9,6 +9,7 @@ protocol DrawsContent {
     static var displayWidth: Int { get }
     static var displayHeight: Int { get }
     static var bytesInPixel: Int { get }
+    var isPortrait: Bool { get }
     static func getRedrawBuffer(color: UInt16) -> [UInt8]
     static func getUpdateBuffer(count: Int, color: UInt16) -> [UInt8]
     func draw(_ buffer: [UInt8])
@@ -17,15 +18,16 @@ protocol DrawsContent {
 
 final class DisplayController: @unchecked Sendable {
     private static let displaySerialLane = DispatchQueue(
-        label: "acemagic-s1.lane.serial.display",
+        label: "acemagic-s1.serial.display",
         target: .global(qos: .default)
     )
     private static let displayResurrectorSerialLane = DispatchQueue(
-        label: "acemagic-s1.lane.serial.display.resurrector",
+        label: "acemagic-s1.serial.display-resurrector",
         target: .global(qos: .default)
     )
 
     private let state = State()
+    private let configuration = Configuration()
     private let vendorId: UInt16
     private let productId: UInt16
     private let interface: Int32
@@ -188,6 +190,7 @@ extension DisplayController: DrawsContent {
     static let displayWidth: Int = 170
     static let displayHeight: Int = 320
     static let bytesInPixel: Int = 2
+    var isPortrait: Bool { configuration.isPortrait }
 
     static func getRedrawBuffer(color: UInt16) -> [UInt8] {
         getUpdateBuffer(count: DisplayController.displayWidth * DisplayController.displayHeight, color: color)
@@ -276,7 +279,7 @@ extension DisplayController: DrawsContent {
 extension DisplayController {
     private class State: @unchecked Sendable {
         static let displayStateLane = DispatchQueue(
-            label: "acemagic-s1.lane.concurrent.state.display",
+            label: "acemagic-s1.lane.concurrent.display-state",
             attributes: .concurrent,
             target: .global(qos: .default)
         )
@@ -370,6 +373,38 @@ extension DisplayController {
             _hasNoKernelDriver = false
             _isInterfaceClaimed = false
             _isAllowedToWrite = false
+        }
+    }
+}
+
+extension DisplayController {
+    private class Configuration: @unchecked Sendable {
+        private static let displayConfigurationSerialLane = DispatchQueue(
+            label: "acemagic-s1.serial.display-configuration",
+            target: .global(qos: .default)
+        )
+
+        var isPortrait: Bool {
+            get {
+                Configuration.displayConfigurationSerialLane.sync {
+                    _isPortrait
+                }
+            }
+            set {
+                Configuration.displayConfigurationSerialLane.sync {
+                    _isPortrait = newValue
+                }
+            }
+        }
+
+        private var _isPortrait: Bool
+
+        init() {
+            _isPortrait = true
+            Configuration.displayConfigurationSerialLane.async { [weak self] in
+                #warning("read the values from config file")
+                self?._isPortrait = true
+            }
         }
     }
 }

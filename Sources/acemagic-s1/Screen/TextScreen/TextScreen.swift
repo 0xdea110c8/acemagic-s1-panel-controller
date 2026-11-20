@@ -1,18 +1,16 @@
 import Foundation
 
-private protocol ProvidesValueUpdate {
-}
-
 final class TextScreen: @unchecked Sendable {
     private static let textScreenSerialLane = DispatchQueue(
-        label: "acemagic-s1.lane.serial.screen.text",
+        label: "acemagic-s1.serial.text-screen",
         target: .global(qos: .default)
     )
     private let font = IBMPlexMonoFont.self
     private let drawer: any DrawsContent
     private let monitor: any ProvidesSystemMetrics
     private var lineUpdater: DispatchSourceTimer?
-    private var lines: [StringLiveLine]!
+    private var isPortrait: Bool { drawer.isPortrait }
+    private var lines: [[(line: StringLiveLine, start: Int, width: Int)]]!
 
     init(
         drawer: any DrawsContent,
@@ -29,92 +27,77 @@ final class TextScreen: @unchecked Sendable {
     }
 
     private func addLines() {
-        lines = [
-            IntMetricLine(
-                name: "LOAD",
-                valueGetter: self.monitor.loadAvg,
-                color: RGB565.darkGray,
-                warningColor: RGB565.yellow,
-                warningRange: 60..<80,
-                criticalColor: RGB565.red,
-                criticalRange: 80...100
-            ),
-            IntMetricLine(
-                name: "CPU",
-                valueGetter: self.monitor.cpuUsage,
-                color: RGB565.darkGray,
-                warningColor: RGB565.yellow,
-                warningRange: 60..<80,
-                criticalColor: RGB565.red,
-                criticalRange: 80...100
-            ),
-            IntMetricLine(
-                name: "TEMP",
-                valueGetter: self.monitor.cpuTemp,
-                color: RGB565.darkGray,
-                warningColor: RGB565.yellow,
-                warningRange: 80..<95,
-                criticalColor: RGB565.red,
-                criticalRange: 95...200
-            ),
-            IntMetricLine(
-                name: "RAM",
-                valueGetter: self.monitor.ramUsage,
-                color: RGB565.darkGray,
-                warningColor: RGB565.yellow,
-                warningRange: 60..<80,
-                criticalColor: RGB565.red,
-                criticalRange: 80...100
-            ),
-            IntMetricLine(
-                name: "SWAP",
-                valueGetter: self.monitor.swapUsage,
-                color: RGB565.darkGray,
-                warningColor: RGB565.yellow,
-                warningRange: 60..<80,
-                criticalColor: RGB565.red,
-                criticalRange: 80...100
-            ),
-            IntMetricLine(
-                name: "DISK",
-                valueGetter: self.monitor.diskUsage,
-                color: RGB565.darkGray,
-                warningColor: RGB565.yellow,
-                warningRange: 60..<80,
-                criticalColor: RGB565.red,
-                criticalRange: 80...100
-            ),
-            IntMetricLine(
-                name: "RSSI",
-                valueGetter: self.monitor.rssi,
-                color: RGB565.darkGray,
-                warningColor: RGB565.yellow,
-                warningRange: -75 ..< -66,
-                criticalColor: RGB565.red,
-                criticalRange: -1000 ... -75
-            ),
-            AWGMetricLine(
-                valueGetter: self.monitor.awgInterfaces,
-                color: RGB565.darkGray
-            ),
-            EmptyLine(),
-            EmptyLine(),
-            EmptyLine(),
-            EmptyLine(),
-            EmptyLine(),
-            EmptyLine(),
-            UptimeMetricLine(
-                valueGetter: self.monitor.uptime,
-                color: RGB565.darkGray
-            ),
-            ClockMetricLine(color: RGB565.darkGray),
-        ]
+        if isPortrait {
+            /*
+            LOAD       000|
+            CPU        000|
+            TEMP       000|
+            RAM        000|
+            SWAP       000|
+            DISK       000|
+            RSSI       000|
+            AWG        000|
+                       000|
+                       000|
+                       000|
+                       000|
+                       000|
+                       000|
+                       000|
+            00:00    00/00|
+*/
+            lines = [
+                [(loadLine, 0, 14)],
+                [(cpuLine, 0, 14)],
+                [(tempLine, 0, 14)],
+                [(ramLine, 0, 14)],
+                [(swapLine, 0, 14)],
+                [(diskLine, 0, 14)],
+                [(rssiLine, 0, 14)],
+                [(awgLine, 0, 14)],
+                [(emptyLine, 0, 14)],
+                [(emptyLine, 0, 14)],
+                [(emptyLine, 0, 14)],
+                [(emptyLine, 0, 14)],
+                [(emptyLine, 0, 14)],
+                [(emptyLine, 0, 14)],
+                [(uptimeLine, 0, 14)],
+                [(clockLine, 0, 14)],
+            ]
+        } else {
+            /*
+            LOAD 000 CPU  000 TEMP 000|
+            RAM  000 SWAP 000 DISK 000|
+            SIG -000 AWG DOWN XXXX 000|
+                                      |
+                                      |
+                                      |
+                                      |
+            00:00 00/00      000:00:00|
+*/
+            lines = [
+                [(loadLine, 0, 8), (cpuLine, 8, 8), (tempLine, 16, 8)],
+                [(ramLine, 0, 8), (swapLine, 8, 8), (diskLine, 16, 8)],
+                [(rssiLine, 0, 8), (awgLine, 8, 8)],
+                [(emptyLine, 0, 24)],
+                [(emptyLine, 0, 24)],
+                [(emptyLine, 0, 24)],
+                [(emptyLine, 0, 24)],
+                [(clockLine, 0, 11), (uptimeLine, 17, 9)],
+            ]
+        }
     }
 
     private func redraw() {
         var buffer = type(of: drawer).getRedrawBuffer(color: RGB565.black.color)
         render(
-            lines.map { $0.stringRepresentation }.joined(separator: "\n"),
+            lines
+                .compactMap {
+                    $0
+                        .map { $0.line.stringRepresentation(width: $0.width) }
+                        .joined(separator: " ")
+                }
+                .joined(separator: "\n"),
             in: &buffer,
             color: RGB565.darkGray.color
         )
@@ -204,10 +187,21 @@ final class TextScreen: @unchecked Sendable {
         let lineUpdater = DispatchSource.makeTimerSource(queue: TextScreen.textScreenSerialLane)
         lineUpdater.setEventHandler { [weak self] in
             guard let self else { return }
-            for index in 0..<lines.count {
-                let updates = lines[index].update()
-                updates.forEach {
-                    updateText($0.value, in: index, at: $0.index, color: $0.color.color)
+            for i in 0..<lines.count {
+                for j in 0..<lines[i].count {
+                    let updates = lines[i][j].line
+                        .update(
+                            start: lines[i][j].start,
+                            width: lines[i][j].width
+                        )
+                    updates.forEach {
+                        updateText(
+                            $0.value,
+                            in: i,
+                            at: $0.index,
+                            color: $0.color.color
+                        )
+                    }
                 }
             }
         }
@@ -237,4 +231,110 @@ final class TextScreen: @unchecked Sendable {
             buffer: buffer
         )
     }
+}
+
+extension TextScreen {
+    var loadLine: IntMetricLine {
+        IntMetricLine(
+            name: "LOAD",
+            valueGetter: self.monitor.loadAvg,
+            color: RGB565.darkGray,
+            warningColor: RGB565.yellow,
+            warningRange: 60..<80,
+            criticalColor: RGB565.red,
+            criticalRange: 80...100
+        )
+    }
+
+    var cpuLine: IntMetricLine {
+        IntMetricLine(
+            name: "CPU",
+            valueGetter: self.monitor.cpuUsage,
+            color: RGB565.darkGray,
+            warningColor: RGB565.yellow,
+            warningRange: 60..<80,
+            criticalColor: RGB565.red,
+            criticalRange: 80...100
+        )
+    }
+
+    var tempLine: IntMetricLine {
+        IntMetricLine(
+            name: "TEMP",
+            valueGetter: self.monitor.cpuTemp,
+            color: RGB565.darkGray,
+            warningColor: RGB565.yellow,
+            warningRange: 80..<95,
+            criticalColor: RGB565.red,
+            criticalRange: 95...200
+        )
+    }
+
+    var ramLine: IntMetricLine {
+        IntMetricLine(
+            name: "RAM",
+            valueGetter: self.monitor.ramUsage,
+            color: RGB565.darkGray,
+            warningColor: RGB565.yellow,
+            warningRange: 60..<80,
+            criticalColor: RGB565.red,
+            criticalRange: 80...100
+        )
+    }
+
+    var swapLine: IntMetricLine {
+        IntMetricLine(
+            name: "SWAP",
+            valueGetter: self.monitor.swapUsage,
+            color: RGB565.darkGray,
+            warningColor: RGB565.yellow,
+            warningRange: 60..<80,
+            criticalColor: RGB565.red,
+            criticalRange: 80...100
+        )
+    }
+
+    var diskLine: IntMetricLine {
+        IntMetricLine(
+            name: "DISK",
+            valueGetter: self.monitor.diskUsage,
+            color: RGB565.darkGray,
+            warningColor: RGB565.yellow,
+            warningRange: 60..<80,
+            criticalColor: RGB565.red,
+            criticalRange: 80...100
+        )
+    }
+
+    var rssiLine: IntMetricLine {
+        IntMetricLine(
+            name: "RSSI",
+            valueGetter: self.monitor.rssi,
+            color: RGB565.darkGray,
+            warningColor: RGB565.yellow,
+            warningRange: -75 ..< -66,
+            criticalColor: RGB565.red,
+            criticalRange: -1000 ... -75
+        )
+    }
+
+    var awgLine: AWGMetricLine {
+        AWGMetricLine(
+            valueGetter: self.monitor.awgInterfaces,
+            color: RGB565.darkGray
+        )
+    }
+
+    var uptimeLine: UptimeMetricLine {
+        UptimeMetricLine(
+            valueGetter: self.monitor.uptime,
+            color: RGB565.darkGray
+        )
+    }
+
+    var clockLine: ClockMetricLine {
+        ClockMetricLine(color: RGB565.darkGray)
+    }
+
+    var emptyLine: EmptyLine { EmptyLine() }
 }
