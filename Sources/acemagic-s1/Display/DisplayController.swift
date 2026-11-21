@@ -86,6 +86,8 @@ final class DisplayController: @unchecked Sendable {
                             state.isInterfaceClaimed = true
                             log(.interfaceClaimed(interface))
                         }
+                        // set orientation
+                        setOrientation(portrait: configuration.isPortrait)
                         // allow to send packets
                         state.isAllowedToWrite = true
                         log(.allowedToWrite)
@@ -151,7 +153,19 @@ final class DisplayController: @unchecked Sendable {
         }
     }
 
-    private func interruptWrite(_ packet: [UInt8]) {
+    private func setOrientation(portrait: Bool) {
+        DisplayController.displaySerialLane.async { [self] in
+            execute {
+                let packet = portrait ? DisplayPacket.portraitOrientation() : DisplayPacket.landscapeOrientation()
+                interruptWrite(packet, maintenance: true)
+                if configuration.isPortrait != portrait {
+                    configuration.isPortrait = portrait
+                }
+            }
+        }
+    }
+
+    private func interruptWrite(_ packet: [UInt8], maintenance: Bool = false) {
         DisplayController.displaySerialLane.async { [self] in
             execute {
                 if state.isReady, let handle {
@@ -391,8 +405,9 @@ extension DisplayController {
                 }
             }
             set {
-                Configuration.displayConfigurationSerialLane.sync {
-                    _isPortrait = newValue
+                Configuration.displayConfigurationSerialLane.async { [weak self] in
+                    self?._isPortrait = newValue
+                    #warning("write the value down to config file")
                 }
             }
         }
@@ -403,7 +418,7 @@ extension DisplayController {
             _isPortrait = true
             Configuration.displayConfigurationSerialLane.async { [weak self] in
                 #warning("read the values from config file")
-                self?._isPortrait = true
+                self?._isPortrait = false
             }
         }
     }
