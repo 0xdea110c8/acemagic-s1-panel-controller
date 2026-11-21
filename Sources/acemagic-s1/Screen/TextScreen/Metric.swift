@@ -233,7 +233,8 @@ struct ClockMetricLine: StringLiveLine {
         let minuteString = String(format: "%02d", minute)
         let dayString = String(format: "%02d", day)
         let monthString = String(format: "%02d", month)
-        return "\(hourString):\(minuteString)    \(dayString)/\(monthString)"
+        let spacing = String(repeatElement(" ", count: width - 10))
+        return "\(hourString):\(minuteString)\(spacing)\(dayString)/\(monthString)"
     }
 
     mutating func update(start: Int, width: Int) -> [LineUpdate] {
