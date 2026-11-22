@@ -211,16 +211,6 @@ struct UptimeMetricLine: StringLiveLine {
     }
 }
 
-struct EmptyLine: StringLiveLine {
-    func stringRepresentation(width: Int) -> String {
-        ""
-    }
-
-    mutating func update(start: Int, width: Int) -> [LineUpdate] {
-        []
-    }
-}
-
 struct ClockMetricLine: StringLiveLine {
     var hour: Int = 0
     var minute: Int = 0
@@ -265,7 +255,7 @@ struct ClockMetricLine: StringLiveLine {
             day = dateComponents.day
             updates.append(
                 LineUpdate(
-                    index: start + 9,
+                    index: start + width - 5,
                     value: String(format: "%02d", day),
                     color: color
                 )
@@ -275,12 +265,22 @@ struct ClockMetricLine: StringLiveLine {
             month = dateComponents.month
             updates.append(
                 LineUpdate(
-                    index: start + 12,
+                    index: start + width - 2,
                     value: String(format: "%02d", month),
                     color: color
                 )
             )
         }
         return updates
+    }
+}
+
+struct EmptyLine: StringLiveLine {
+    func stringRepresentation(width: Int) -> String {
+        String(repeatElement(" ", count: width))
+    }
+
+    mutating func update(start: Int, width: Int) -> [LineUpdate] {
+        []
     }
 }
