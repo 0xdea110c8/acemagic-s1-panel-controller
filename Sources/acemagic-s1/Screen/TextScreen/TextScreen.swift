@@ -55,12 +55,12 @@ final class TextScreen: @unchecked Sendable {
                 [(diskLine, 0, 14)],
                 [(rssiLine, 0, 14)],
                 [(awgLine, 0, 14)],
-                [(emptyLine, 0, 14)],
-                [(emptyLine, 0, 14)],
-                [(emptyLine, 0, 14)],
-                [(emptyLine, 0, 14)],
-                [(emptyLine, 0, 14)],
-                [(emptyLine, 0, 14)],
+                [(emptyLine, 0, 0)],
+                [(emptyLine, 0, 0)],
+                [(emptyLine, 0, 0)],
+                [(emptyLine, 0, 0)],
+                [(emptyLine, 0, 0)],
+                [(emptyLine, 0, 0)],
                 [(uptimeLine, 0, 14)],
                 [(clockLine, 0, 14)],
             ]
@@ -76,28 +76,30 @@ final class TextScreen: @unchecked Sendable {
             00:00 00/00      000:00:00|
 */
             lines = [
-                [(loadLine, 0, 8), (cpuLine, 8, 8), (tempLine, 16, 8)],
-                [(ramLine, 0, 8), (swapLine, 8, 8), (diskLine, 16, 8)],
-                [(rssiLine, 0, 8), (awgLine, 8, 8)],
-                [(emptyLine, 0, 24)],
-                [(emptyLine, 0, 24)],
-                [(emptyLine, 0, 24)],
-                [(emptyLine, 0, 24)],
-                [(clockLine, 0, 11), (uptimeLine, 17, 9)],
+                [(loadLine, 0, 8), (emptyLine, 0, 1), (cpuLine, 9, 8), (emptyLine, 0, 1), (tempLine, 18, 8)],
+                [(ramLine, 0, 8), (emptyLine, 0, 1), (swapLine, 9, 8), (emptyLine, 0, 1), (diskLine, 18, 8)],
+                [(rssiLine, 0, 8), (emptyLine, 0, 1), (awgLine, 9, 8)],
+                [(emptyLine, 0, 0)],
+                [(emptyLine, 0, 0)],
+                [(emptyLine, 0, 0)],
+                [(emptyLine, 0, 0)],
+                [(clockLine, 0, 11), (emptyLine, 0, 6), (uptimeLine, 17, 9)],
             ]
         }
     }
 
     private func redraw() {
         var buffer = type(of: drawer).getRedrawBuffer(color: RGB565.black.color)
-        render(
+        let text =
             lines
-                .compactMap {
-                    $0
-                        .map { $0.line.stringRepresentation(width: $0.width) }
-                        .joined(separator: " ")
-                }
-                .joined(separator: "\n"),
+            .compactMap {
+                $0
+                    .map { $0.line.stringRepresentation(width: $0.width) }
+                    .joined(separator: "")
+            }
+            .joined(separator: "\n")
+        render(
+            text,
             in: &buffer,
             color: RGB565.darkGray.color
         )
@@ -105,6 +107,14 @@ final class TextScreen: @unchecked Sendable {
     }
 
     private func render(_ text: String, in buffer: inout [UInt8], color: UInt16) {
+        if isPortrait {
+            renderPortrait(text, in: &buffer, color: color)
+        } else {
+            renderLandscape(text, in: &buffer, color: color)
+        }
+    }
+
+    private func renderPortrait(_ text: String, in buffer: inout [UInt8], color: UInt16) {
         let height = type(of: drawer).displayHeight
         let bytesInPixel = type(of: drawer).bytesInPixel
         var start = buffer.count - height * bytesInPixel
@@ -112,15 +122,17 @@ final class TextScreen: @unchecked Sendable {
         let uppercasedText = text.uppercased()
         for char in uppercasedText {
             if char == "\n" {
+                // handle new line
                 start += font.height * bytesInPixel
                 pixel = start
                 continue
             }
             do {
+                // render symbol
                 let bitmap = try font.Glyph(char: char).bitmap
                 for x in 0..<font.width {
                     for y in 0..<font.height {
-                        renderPixel(
+                        renderPixelPortrait(
                             pixel,
                             in: &buffer,
                             at: (x, y),
@@ -130,14 +142,48 @@ final class TextScreen: @unchecked Sendable {
                     }
                     pixel -= height * bytesInPixel
                 }
-                pixel -= height * bytesInPixel * font.advance
+            } catch {
+                fatalError("No bitmap for char \(char) in \(font)")
+            }
+        }
+    }
+    private func renderLandscape(
+        _ text: String,
+        in buffer: inout [UInt8],
+        color: UInt16
+    ) {
+        let width = type(of: drawer).displayHeight
+        let bytesInPixel = type(of: drawer).bytesInPixel
+        var start = 0
+        var pixel = start
+
+        for char in text.uppercased() {
+            if char == "\n" {
+                start += font.height * width * bytesInPixel
+                pixel = start
+                continue
+            }
+            do {
+                let bitmap = try font.Glyph(char: char).bitmap
+                for x in 0..<font.width {
+                    for y in 0..<font.height {
+                        renderPixelLandscape(
+                            pixel,
+                            in: &buffer,
+                            at: (x, y),
+                            with: bitmap,
+                            color: color
+                        )
+                    }
+                    pixel += bytesInPixel
+                }
             } catch {
                 fatalError("No bitmap for char \(char) in \(font)")
             }
         }
     }
 
-    func renderUpdate(_ text: String, in buffer: inout [UInt8], color: UInt16) {
+    func renderUpdatePortrait(_ text: String, in buffer: inout [UInt8], color: UInt16) {
         let bytesInPixel = type(of: drawer).bytesInPixel
         var pixel = buffer.count - font.height * bytesInPixel
         let uppercasedText = text.uppercased()
@@ -146,7 +192,7 @@ final class TextScreen: @unchecked Sendable {
                 let bitmap = try font.Glyph(char: char).bitmap
                 for x in 0..<font.width {
                     for y in 0..<font.height {
-                        renderPixel(
+                        renderPixelPortrait(
                             pixel,
                             in: &buffer,
                             at: (x, y),
@@ -156,14 +202,39 @@ final class TextScreen: @unchecked Sendable {
                     }
                     pixel -= font.height * bytesInPixel
                 }
-                pixel -= font.height * bytesInPixel * font.advance
             } catch {
                 fatalError("No bitmap for char \(char) in \(font)")
             }
         }
     }
 
-    private func renderPixel(
+    func renderUpdateLandscape(_ text: String, in buffer: inout [UInt8], color: UInt16) {
+        let bytesInPixel = type(of: drawer).bytesInPixel
+        var pixel = 0
+        let uppercasedText = text.uppercased()
+        for char in uppercasedText {
+            do {
+                let bitmap = try font.Glyph(char: char).bitmap
+                for x in 0..<font.width {
+                    for y in 0..<font.height {
+                        renderUpdatePixelLandscape(
+                            pixel,
+                            in: &buffer,
+                            width: font.width * text.count,
+                            at: (x, y),
+                            with: bitmap,
+                            color: color
+                        )
+                    }
+                    pixel += bytesInPixel
+                }
+            } catch {
+                fatalError("No bitmap for char \(char) in \(font)")
+            }
+        }
+    }
+
+    private func renderPixelPortrait(
         _ pixel: Int,
         in frameBuffer: inout [UInt8],
         at point: (x: Int, y: Int),
@@ -179,8 +250,53 @@ final class TextScreen: @unchecked Sendable {
         let color = isFilled ? color : RGB565.black.color
         let colorHighByte = UInt8(color >> 8)
         let colorLowByte = UInt8(color & 0x00FF)
-        frameBuffer[pixel + point.y * bytesInPixel] = colorHighByte
-        frameBuffer[pixel + point.y * bytesInPixel + 1] = colorLowByte
+        let offset = pixel + point.y * bytesInPixel
+        frameBuffer[offset] = colorHighByte
+        frameBuffer[offset + 1] = colorLowByte
+    }
+
+    private func renderPixelLandscape(
+        _ pixel: Int,
+        in frameBuffer: inout [UInt8],
+        at point: (x: Int, y: Int),
+        with bitmap: borrowing [UInt8],
+        color: UInt16
+    ) {
+        let height = type(of: drawer).displayHeight
+        let bytesInPixel = type(of: drawer).bytesInPixel
+        let glyphY = font.height - point.y - 1
+        let bitIndex = glyphY * font.width + point.x
+        let byteIndex = bitIndex / 8
+        let bitOffset = 7 - (bitIndex % 8)
+        let isFilled = bitmap[byteIndex] & (1 << bitOffset) != 0
+        let color = isFilled ? color : RGB565.black.color
+        let colorHighByte = UInt8(color >> 8)
+        let colorLowByte = UInt8(color & 0x00FF)
+        let offset = pixel + point.y * height * bytesInPixel
+        frameBuffer[offset] = colorHighByte
+        frameBuffer[offset + 1] = colorLowByte
+    }
+
+    private func renderUpdatePixelLandscape(
+        _ pixel: Int,
+        in frameBuffer: inout [UInt8],
+        width: Int,
+        at point: (x: Int, y: Int),
+        with bitmap: borrowing [UInt8],
+        color: UInt16
+    ) {
+        let bytesInPixel = type(of: drawer).bytesInPixel
+        let glyphY = font.height - point.y - 1
+        let bitIndex = glyphY * font.width + point.x
+        let byteIndex = bitIndex / 8
+        let bitOffset = 7 - (bitIndex % 8)
+        let isFilled = bitmap[byteIndex] & (1 << bitOffset) != 0
+        let color = isFilled ? color : RGB565.black.color
+        let colorHighByte = UInt8(color >> 8)
+        let colorLowByte = UInt8(color & 0x00FF)
+        let offset = pixel + point.y * width * bytesInPixel
+        frameBuffer[offset] = colorHighByte
+        frameBuffer[offset + 1] = colorLowByte
     }
 
     private func setTimer() {
@@ -195,12 +311,21 @@ final class TextScreen: @unchecked Sendable {
                             width: lines[i][j].width
                         )
                     updates.forEach {
-                        updateText(
-                            $0.value,
-                            in: i,
-                            at: $0.index,
-                            color: $0.color.color
-                        )
+                        if isPortrait {
+                            updateTextPortrait(
+                                $0.value,
+                                in: i,
+                                at: $0.index,
+                                color: $0.color.color
+                            )
+                        } else {
+                            updateTextLandscape(
+                                $0.value,
+                                in: i,
+                                at: $0.index,
+                                color: $0.color.color
+                            )
+                        }
                     }
                 }
             }
@@ -210,7 +335,7 @@ final class TextScreen: @unchecked Sendable {
         self.lineUpdater = lineUpdater
     }
 
-    private func updateText(_ text: String, in line: Int, at index: Int, color: UInt16) {
+    private func updateTextPortrait(_ text: String, in line: Int, at index: Int, color: UInt16) {
         let displayWidth = type(of: drawer).displayWidth
         let coordinates = (
             x: displayWidth - 1 - font.width * (index + text.count),
@@ -222,7 +347,29 @@ final class TextScreen: @unchecked Sendable {
                 count: rect.width * rect.height,
                 color: RGB565.black.color
             )
-        renderUpdate(text, in: &buffer, color: color)
+        renderUpdatePortrait(text, in: &buffer, color: color)
+        drawer.update(
+            x: coordinates.x,
+            y: coordinates.y,
+            width: rect.width,
+            height: rect.height,
+            buffer: buffer
+        )
+    }
+
+    private func updateTextLandscape(_ text: String, in line: Int, at index: Int, color: UInt16) {
+        let coordinates = (
+            x: font.height * line,
+            y: font.width * index
+        )
+
+        let rect = (width: font.height, height: font.width * text.count)
+        var buffer: [UInt8] = type(of: drawer)
+            .getUpdateBuffer(
+                count: rect.width * rect.height,
+                color: RGB565.black.color
+            )
+        renderUpdateLandscape(text, in: &buffer, color: color)
         drawer.update(
             x: coordinates.x,
             y: coordinates.y,

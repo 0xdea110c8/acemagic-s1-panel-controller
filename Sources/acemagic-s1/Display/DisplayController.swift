@@ -57,58 +57,58 @@ final class DisplayController: @unchecked Sendable {
     }
 
     private func openDisplay() {
-        DisplayController.displaySerialLane.async { [self] in
-            execute(
-                {
-                    // open display
-                    if !state.isOpen {
-                        let result = try USBHID.open(vendorId: vendorId, productId: productId)
-                        handle = result.handle
-                        context = result.context
-                        state.isOpen = true
-                        log(.opened)
+        execute(
+            {
+                // open display
+                if !state.isOpen {
+                    let result = try USBHID.open(vendorId: vendorId, productId: productId)
+                    handle = result.handle
+                    context = result.context
+                    state.isOpen = true
+                    log(.opened)
+                }
+                if let handle {
+                    // detach kernel driver
+                    if state.isOpen {
+                        let hadKernelDriverAttached = try USBHID.detachKernelDriver(interface, handle: handle)
+                        if hadKernelDriverAttached {
+                            state.isKernelDriverDetached = true
+                            log(.kernelDriverDetached(interface))
+                        } else {
+                            state.hasNoKernelDriver = true
+                            log(.hadNoKernelDriver(interface))
+                        }
                     }
-                    if let handle {
-                        // detach kernel driver
-                        if state.isOpen {
-                            let hadKernelDriverAttached = try USBHID.detachKernelDriver(interface, handle: handle)
-                            if hadKernelDriverAttached {
-                                state.isKernelDriverDetached = true
-                                log(.kernelDriverDetached(interface))
-                            } else {
-                                state.hasNoKernelDriver = true
-                                log(.hadNoKernelDriver(interface))
-                            }
-                        }
-                        // claim interface
-                        if state.isReadytoClaimInterface {
-                            try USBHID.claimInterface(interface, handle: handle)
-                            state.isInterfaceClaimed = true
-                            log(.interfaceClaimed(interface))
-                        }
-                        // set orientation
-                        setOrientation(portrait: configuration.isPortrait)
-                        // allow to send packets
-                        state.isAllowedToWrite = true
-                        log(.allowedToWrite)
-                        // set display resurrector
-                        let displayResurrector = DispatchSource.makeTimerSource(
-                            queue: DisplayController.displayResurrectorSerialLane
-                        )
-                        displayResurrector.schedule(deadline: .now(), repeating: 1.0, leeway: .milliseconds(50))
-                        displayResurrector.setEventHandler { [weak self] in
-                            let time = Calendar.current.timeComponents()
-                            let packet = DisplayPacket.time(time.hour, time.minute, time.second)
-                            self?.interruptWrite(packet)
-                        }
-                        displayResurrector.activate()
-                        log(.resurrectorActivated)
-                        self.displayResurrector = displayResurrector
+                    // claim interface
+                    if state.isReadytoClaimInterface {
+                        try USBHID.claimInterface(interface, handle: handle)
+                        state.isInterfaceClaimed = true
+                        log(.interfaceClaimed(interface))
                     }
-                },
-                onFailure: closeDisplay
-            )
-        }
+                    // set orientation
+                    debugPrint(isPortrait)
+                    setOrientation()
+                    log(.orientationSet)
+                    // allow to send packets
+                    state.isAllowedToWrite = true
+                    log(.allowedToWrite)
+                    // set display resurrector
+                    let displayResurrector = DispatchSource.makeTimerSource(
+                        queue: DisplayController.displayResurrectorSerialLane
+                    )
+                    displayResurrector.schedule(deadline: .now(), repeating: 1.0, leeway: .milliseconds(50))
+                    displayResurrector.setEventHandler { [weak self] in
+                        let time = Calendar.current.timeComponents()
+                        let packet = DisplayPacket.time(time.hour, time.minute, time.second)
+                        self?.interruptWrite(packet)
+                    }
+                    displayResurrector.activate()
+                    log(.resurrectorActivated)
+                    self.displayResurrector = displayResurrector
+                }
+            },
+            onFailure: closeDisplay
+        )
     }
 
     private func closeDisplay(facedErrorWhileOpening: Bool) {
@@ -153,14 +153,13 @@ final class DisplayController: @unchecked Sendable {
         }
     }
 
-    private func setOrientation(portrait: Bool) {
+    private func setOrientation() {
         DisplayController.displaySerialLane.async { [self] in
             execute {
-                let packet = portrait ? DisplayPacket.portraitOrientation() : DisplayPacket.landscapeOrientation()
+                let packet =
+                    configuration.isPortrait
+                    ? DisplayPacket.portraitOrientation() : DisplayPacket.landscapeOrientation()
                 interruptWrite(packet, maintenance: true)
-                if configuration.isPortrait != portrait {
-                    configuration.isPortrait = portrait
-                }
             }
         }
     }
@@ -168,7 +167,8 @@ final class DisplayController: @unchecked Sendable {
     private func interruptWrite(_ packet: [UInt8], maintenance: Bool = false) {
         DisplayController.displaySerialLane.async { [self] in
             execute {
-                if state.isReady, let handle {
+                let state = maintenance ? state.isOpen : state.isReady
+                if state, let handle {
                     try USBHID.interruptWrite(packet, handle: handle, to: endpoint, with: timeout)
                     log(.packetSent(packet))
                 }
@@ -432,6 +432,7 @@ extension DisplayController {
         case interfaceClaimed(Int32)
         case interfaceReleased(Int32)
         case kernelDriverAttached(Int32)
+        case orientationSet
         case allowedToWrite
         case disallowedToWrite
         case transferred(Int)
@@ -454,6 +455,8 @@ extension DisplayController {
                     return "released interface \(interface)"
                 case .kernelDriverAttached(let interface):
                     return "attached kernel driver on interface \(interface)"
+                case .orientationSet:
+                    return "orientation set"
                 case .allowedToWrite:
                     return "allowed to write"
                 case .disallowedToWrite:
