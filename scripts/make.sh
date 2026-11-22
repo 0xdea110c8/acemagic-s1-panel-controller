@@ -36,6 +36,7 @@ User=$SERVICE_USER
 ExecStart=$INSTALL_PATH
 Restart=on-failure
 RestartSec=2
+StateDirectory=s1panel
 
 [Install]
 WantedBy=multi-user.target

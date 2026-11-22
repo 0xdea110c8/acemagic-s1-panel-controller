@@ -393,32 +393,57 @@ extension DisplayController {
 
 extension DisplayController {
     private class Configuration: @unchecked Sendable {
+        struct ConfigurationData: Codable {
+            var isPortrait: Bool
+
+            init() {
+                isPortrait = true
+            }
+        }
+
         private static let displayConfigurationSerialLane = DispatchQueue(
             label: "acemagic-s1.serial.display-configuration",
             target: .global(qos: .default)
         )
 
+        private let configurationUrl = URL(fileURLWithPath: "/var/lib/s1panel/state.json")
+        private var configurationData = ConfigurationData()
+
         var isPortrait: Bool {
             get {
                 Configuration.displayConfigurationSerialLane.sync {
-                    _isPortrait
+                    configurationData.isPortrait
                 }
             }
             set {
                 Configuration.displayConfigurationSerialLane.async { [weak self] in
-                    self?._isPortrait = newValue
-                    #warning("write the value down to config file")
+                    guard let self else { return }
+                    if configurationData.isPortrait != newValue {
+                        configurationData.isPortrait = newValue
+                        saveConfiguration()
+                    }
                 }
             }
         }
 
-        private var _isPortrait: Bool
-
         init() {
-            _isPortrait = true
             Configuration.displayConfigurationSerialLane.async { [weak self] in
-                #warning("read the values from config file")
-                self?._isPortrait = false
+                guard let self else { return }
+                if FileManager.default.fileExists(atPath: configurationUrl.path),
+                    let data = try? Data(contentsOf: configurationUrl),
+                    let configurationData = try? JSONDecoder().decode(ConfigurationData.self, from: data)
+                {
+                    self.configurationData = configurationData
+                }
+            }
+        }
+
+        private func saveConfiguration() {
+            Configuration.displayConfigurationSerialLane.async { [weak self] in
+                guard let self else { return }
+                if let data = try? JSONEncoder().encode(configurationData) {
+                    try? data.write(to: configurationUrl, options: .atomic)
+                }
             }
         }
     }
