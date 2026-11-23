@@ -9,6 +9,7 @@ protocol DrawsContent {
     static var displayWidth: Int { get }
     static var displayHeight: Int { get }
     static var bytesInPixel: Int { get }
+    var isPortrait: Bool { get }
     static func getRedrawBuffer(color: UInt16) -> [UInt8]
     static func getUpdateBuffer(count: Int, color: UInt16) -> [UInt8]
     func draw(_ buffer: [UInt8])
@@ -17,15 +18,16 @@ protocol DrawsContent {
 
 final class DisplayController: @unchecked Sendable {
     private static let displaySerialLane = DispatchQueue(
-        label: "acemagic-s1.lane.serial.display",
+        label: "acemagic-s1.serial.display",
         target: .global(qos: .default)
     )
     private static let displayResurrectorSerialLane = DispatchQueue(
-        label: "acemagic-s1.lane.serial.display.resurrector",
+        label: "acemagic-s1.serial.display-resurrector",
         target: .global(qos: .default)
     )
 
     private let state = State()
+    private let configuration = Configuration()
     private let vendorId: UInt16
     private let productId: UInt16
     private let interface: Int32
@@ -55,56 +57,57 @@ final class DisplayController: @unchecked Sendable {
     }
 
     private func openDisplay() {
-        DisplayController.displaySerialLane.async { [self] in
-            execute(
-                {
-                    // open display
-                    if !state.isOpen {
-                        let result = try USBHID.open(vendorId: vendorId, productId: productId)
-                        handle = result.handle
-                        context = result.context
-                        state.isOpen = true
-                        log(.opened)
+        execute(
+            {
+                // open display
+                if !state.isOpen {
+                    let result = try USBHID.open(vendorId: vendorId, productId: productId)
+                    handle = result.handle
+                    context = result.context
+                    state.isOpen = true
+                    log(.opened)
+                }
+                if let handle {
+                    // detach kernel driver
+                    if state.isOpen {
+                        let hadKernelDriverAttached = try USBHID.detachKernelDriver(interface, handle: handle)
+                        if hadKernelDriverAttached {
+                            state.isKernelDriverDetached = true
+                            log(.kernelDriverDetached(interface))
+                        } else {
+                            state.hasNoKernelDriver = true
+                            log(.hadNoKernelDriver(interface))
+                        }
                     }
-                    if let handle {
-                        // detach kernel driver
-                        if state.isOpen {
-                            let hadKernelDriverAttached = try USBHID.detachKernelDriver(interface, handle: handle)
-                            if hadKernelDriverAttached {
-                                state.isKernelDriverDetached = true
-                                log(.kernelDriverDetached(interface))
-                            } else {
-                                state.hasNoKernelDriver = true
-                                log(.hadNoKernelDriver(interface))
-                            }
-                        }
-                        // claim interface
-                        if state.isReadytoClaimInterface {
-                            try USBHID.claimInterface(interface, handle: handle)
-                            state.isInterfaceClaimed = true
-                            log(.interfaceClaimed(interface))
-                        }
-                        // allow to send packets
-                        state.isAllowedToWrite = true
-                        log(.allowedToWrite)
-                        // set display resurrector
-                        let displayResurrector = DispatchSource.makeTimerSource(
-                            queue: DisplayController.displayResurrectorSerialLane
-                        )
-                        displayResurrector.schedule(deadline: .now(), repeating: 1.0, leeway: .milliseconds(50))
-                        displayResurrector.setEventHandler { [weak self] in
-                            let time = Calendar.current.timeComponents()
-                            let packet = DisplayPacket.time(time.hour, time.minute, time.second)
-                            self?.interruptWrite(packet)
-                        }
-                        displayResurrector.activate()
-                        log(.resurrectorActivated)
-                        self.displayResurrector = displayResurrector
+                    // claim interface
+                    if state.isReadytoClaimInterface {
+                        try USBHID.claimInterface(interface, handle: handle)
+                        state.isInterfaceClaimed = true
+                        log(.interfaceClaimed(interface))
                     }
-                },
-                onFailure: closeDisplay
-            )
-        }
+                    // set orientation
+                    setOrientation()
+                    log(.orientationSet)
+                    // allow to send packets
+                    state.isAllowedToWrite = true
+                    log(.allowedToWrite)
+                    // set display resurrector
+                    let displayResurrector = DispatchSource.makeTimerSource(
+                        queue: DisplayController.displayResurrectorSerialLane
+                    )
+                    displayResurrector.schedule(deadline: .now(), repeating: 1.0, leeway: .milliseconds(50))
+                    displayResurrector.setEventHandler { [weak self] in
+                        let time = Calendar.current.timeComponents()
+                        let packet = DisplayPacket.time(time.hour, time.minute, time.second)
+                        self?.interruptWrite(packet)
+                    }
+                    displayResurrector.activate()
+                    log(.resurrectorActivated)
+                    self.displayResurrector = displayResurrector
+                }
+            },
+            onFailure: closeDisplay
+        )
     }
 
     private func closeDisplay(facedErrorWhileOpening: Bool) {
@@ -149,10 +152,22 @@ final class DisplayController: @unchecked Sendable {
         }
     }
 
-    private func interruptWrite(_ packet: [UInt8]) {
+    private func setOrientation() {
         DisplayController.displaySerialLane.async { [self] in
             execute {
-                if state.isReady, let handle {
+                let packet =
+                    configuration.isPortrait
+                    ? DisplayPacket.portraitOrientation() : DisplayPacket.landscapeOrientation()
+                interruptWrite(packet, maintenance: true)
+            }
+        }
+    }
+
+    private func interruptWrite(_ packet: [UInt8], maintenance: Bool = false) {
+        DisplayController.displaySerialLane.async { [self] in
+            execute {
+                let state = maintenance ? state.isOpen : state.isReady
+                if state, let handle {
                     try USBHID.interruptWrite(packet, handle: handle, to: endpoint, with: timeout)
                     log(.packetSent(packet))
                 }
@@ -188,6 +203,7 @@ extension DisplayController: DrawsContent {
     static let displayWidth: Int = 170
     static let displayHeight: Int = 320
     static let bytesInPixel: Int = 2
+    var isPortrait: Bool { configuration.isPortrait }
 
     static func getRedrawBuffer(color: UInt16) -> [UInt8] {
         getUpdateBuffer(count: DisplayController.displayWidth * DisplayController.displayHeight, color: color)
@@ -276,7 +292,7 @@ extension DisplayController: DrawsContent {
 extension DisplayController {
     private class State: @unchecked Sendable {
         static let displayStateLane = DispatchQueue(
-            label: "acemagic-s1.lane.concurrent.state.display",
+            label: "acemagic-s1.lane.concurrent.display-state",
             attributes: .concurrent,
             target: .global(qos: .default)
         )
@@ -375,6 +391,64 @@ extension DisplayController {
 }
 
 extension DisplayController {
+    private class Configuration: @unchecked Sendable {
+        struct ConfigurationData: Codable {
+            var isPortrait: Bool
+
+            init() {
+                isPortrait = true
+            }
+        }
+
+        private static let displayConfigurationSerialLane = DispatchQueue(
+            label: "acemagic-s1.serial.display-configuration",
+            target: .global(qos: .default)
+        )
+
+        private let configurationUrl = URL(fileURLWithPath: "/var/lib/s1panel/state.json")
+        private var configurationData = ConfigurationData()
+
+        var isPortrait: Bool {
+            get {
+                Configuration.displayConfigurationSerialLane.sync {
+                    configurationData.isPortrait
+                }
+            }
+            set {
+                Configuration.displayConfigurationSerialLane.async { [weak self] in
+                    guard let self else { return }
+                    if configurationData.isPortrait != newValue {
+                        configurationData.isPortrait = newValue
+                        saveConfiguration()
+                    }
+                }
+            }
+        }
+
+        init() {
+            Configuration.displayConfigurationSerialLane.async { [weak self] in
+                guard let self else { return }
+                if FileManager.default.fileExists(atPath: configurationUrl.path),
+                    let data = try? Data(contentsOf: configurationUrl),
+                    let configurationData = try? JSONDecoder().decode(ConfigurationData.self, from: data)
+                {
+                    self.configurationData = configurationData
+                }
+            }
+        }
+
+        private func saveConfiguration() {
+            Configuration.displayConfigurationSerialLane.async { [weak self] in
+                guard let self else { return }
+                if let data = try? JSONEncoder().encode(configurationData) {
+                    try? data.write(to: configurationUrl, options: .atomic)
+                }
+            }
+        }
+    }
+}
+
+extension DisplayController {
     private enum Event: CustomStringConvertible {
         case opened
         case kernelDriverDetached(Int32)
@@ -382,6 +456,7 @@ extension DisplayController {
         case interfaceClaimed(Int32)
         case interfaceReleased(Int32)
         case kernelDriverAttached(Int32)
+        case orientationSet
         case allowedToWrite
         case disallowedToWrite
         case transferred(Int)
@@ -404,6 +479,8 @@ extension DisplayController {
                     return "released interface \(interface)"
                 case .kernelDriverAttached(let interface):
                     return "attached kernel driver on interface \(interface)"
+                case .orientationSet:
+                    return "orientation set"
                 case .allowedToWrite:
                     return "allowed to write"
                 case .disallowedToWrite:

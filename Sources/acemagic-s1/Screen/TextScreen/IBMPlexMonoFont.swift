@@ -4,7 +4,6 @@ enum IBMPlexMonoFont {
     static let width = 12
     static let height = 20
     static let advance = 0
-    static let lineSpacing = 0
 
     enum Glyph {
         case A

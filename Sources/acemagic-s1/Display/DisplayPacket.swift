@@ -94,8 +94,7 @@ enum DisplayPacket {
     }
 
     static func update(x: Int, y: Int, width: Int, height: Int, buffer: [UInt8]) -> [UInt8] {
-        precondition(x < 170)
-        precondition(y < 320)
+        precondition(x < 170 && y < 320 || x < 320 && y < 170)
         precondition(width * height <= 2048)
         precondition(buffer.count <= 4096)
 
