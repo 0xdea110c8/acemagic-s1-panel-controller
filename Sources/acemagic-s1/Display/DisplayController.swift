@@ -86,7 +86,6 @@ final class DisplayController: @unchecked Sendable {
                         log(.interfaceClaimed(interface))
                     }
                     // set orientation
-                    debugPrint(isPortrait)
                     setOrientation()
                     log(.orientationSet)
                     // allow to send packets

@@ -272,7 +272,8 @@ final class TextScreen: @unchecked Sendable {
         let color = isFilled ? color : RGB565.black.color
         let colorHighByte = UInt8(color >> 8)
         let colorLowByte = UInt8(color & 0x00FF)
-        let offset = pixel + point.y * height * bytesInPixel
+        // numbers for padding
+        let offset = pixel + 5 * bytesInPixel + (point.y + 4) * (height) * bytesInPixel
         frameBuffer[offset] = colorHighByte
         frameBuffer[offset + 1] = colorLowByte
     }
@@ -359,8 +360,8 @@ final class TextScreen: @unchecked Sendable {
 
     private func updateTextLandscape(_ text: String, in line: Int, at index: Int, color: UInt16) {
         let coordinates = (
-            x: font.height * line,
-            y: font.width * index
+            x: font.height * line + 5,
+            y: font.width * index + 4
         )
 
         let rect = (width: font.height, height: font.width * text.count)
